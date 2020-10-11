@@ -3,6 +3,8 @@
 #ifndef _RVSIM_PROCESSOR_H
 #define _RVSIM_PROCESSOR_H
 
+#include <sstream>
+
 #include "isa.h"
 #include "memory.h"
 #include "registers.h"
@@ -23,6 +25,7 @@ public:
 
   instruction_t Fetch();
   void Execute(instruction_t ins);
+  std::ostringstream doLogLine(instruction_t ins);
 };
 
 #endif

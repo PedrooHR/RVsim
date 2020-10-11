@@ -8,9 +8,8 @@
 using namespace std;
 
 int main(int argc, char** argv) {
-  if ( argc < 2 ) {
-      std::cout << "Uso: rvsim <program> <b|opcional>" << std::endl;
-      std::cout << "O uso do argumento 'b' é opcional, se existir, o simulador considerará a memoria começando a partir do entry point. (Atualmente o simulador aloca 256MiB de memória para o programa)" << std::endl;
+  if ( argc != 2 ) {
+      std::cout << "Uso: rvsim <elf_program>" << std::endl;
       return 1;
   }
 
@@ -29,10 +28,8 @@ int main(int argc, char** argv) {
     uint32_t s_addr = get_elf_entry(elf_bytes, shos + (i * shes) + 0x0C, 4);
     uint32_t s_offset = get_elf_entry(elf_bytes, shos + (i * shes) + 0x10, 4);
     uint32_t s_size = get_elf_entry(elf_bytes, shos + (i * shes) + 0x14, 4);
-    // printf("[%3d] - Address: %x \t Offset: %x \t Size: %x\n", i, s_addr, s_offset, s_size);
     for (int j = 0; j < s_size; j += 4) {
-      int32_t base_address = s_addr + j - (argc == 3 ? entry_point : 0);
-      
+      int32_t base_address = s_addr + j;
       if (base_address >= 0) {
         memory.writeMem(base_address, elf_bytes[s_offset + j]);
         memory.writeMem(base_address + 1, elf_bytes[s_offset + j + 1]);
@@ -42,6 +39,7 @@ int main(int argc, char** argv) {
     }
   }
 
+  // Executa o simulador
   processor_t processor(&memory, entry_point);
   processor.executeProgram();
 

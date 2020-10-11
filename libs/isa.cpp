@@ -4,9 +4,6 @@
 
 #include "utils.h"
 
-static int debug = 1;
-
-
 instruction_t::instruction_t(uint32_t ins, unsigned long int add) {
   address = add;
   inst = ins;
@@ -21,8 +18,6 @@ instruction_t::instruction_t(uint32_t ins, unsigned long int add) {
   shammt = -1;
   cycle = 1; // Atualmente todas instruções levam 1 ciclo
   
-  // printf("INSTRUCAO: 0x%X OPCODE: 0x%x\n", ins, opcode);
-
   // INSTRUCTION DECODE
   // Atualmente no IM temos 11 OPCODES
   switch (opcode) {
@@ -30,7 +25,6 @@ instruction_t::instruction_t(uint32_t ins, unsigned long int add) {
     type = INST_TYPE::U;
     rd = (ins >> 7) & 31;    // 5 bits de reg
     imm = (ins >> 12) << 12; // 20 bits imm
-    mnemonic = "LUI";
     op = MNE::LUI;
     break; // LUI
   }
@@ -38,9 +32,6 @@ instruction_t::instruction_t(uint32_t ins, unsigned long int add) {
     type = INST_TYPE::U;
     rd = (ins >> 7) & 31;    // 5 bits de reg
     imm = (ins >> 12) << 12; // 20 bits imm
-    // imm = ins >> 12;
-    // printf("AUIPC imm %x\n", imm);
-    mnemonic = "AUIPC";
     op = MNE::AUIPC;
     break; // AUIPC
   }
@@ -52,7 +43,6 @@ instruction_t::instruction_t(uint32_t ins, unsigned long int add) {
     int temp_imhigh = ((ins >> 12) & 255) << 12; // 8 bits imm high
     int temp_im20 = ((ins >> 31) & 1) << 20;     // 1 bit
     imm = temp_imlow + temp_im11 + temp_imhigh + temp_im20; // 21 bits de imm
-    mnemonic = "JAL";
     op = MNE::JAL;
     break; // JAL
   }
@@ -62,7 +52,6 @@ instruction_t::instruction_t(uint32_t ins, unsigned long int add) {
     func3 = (ins >> 12) & 7;  // 3 bits func3
     rs1 = (ins >> 15) & 31;   // 5 bits de reg
     imm = (ins >> 20) & 4095; // 12 bits imm
-    mnemonic = "JALR";
     op = MNE::JALR;
     break; // JALR
   }
@@ -79,27 +68,21 @@ instruction_t::instruction_t(uint32_t ins, unsigned long int add) {
 
     switch (func3) {
     case 0: // 000
-      mnemonic = "BEQ";
       op = MNE::BEQ;
       break;
     case 1: // 001
-      mnemonic = "BNE";
       op = MNE::BNE;
       break;
     case 4: // 100
-      mnemonic = "BLT";
       op = MNE::BLT;
       break;
     case 5: // 101
-      mnemonic = "BGE";
       op = MNE::BGE;
       break;
     case 6: // 110
-      mnemonic = "BLTU";
       op = MNE::BLTU;
       break;
     case 7: // 111
-      mnemonic = "BGEU";
       op = MNE::BGEU;
       break;
     }
@@ -114,23 +97,18 @@ instruction_t::instruction_t(uint32_t ins, unsigned long int add) {
 
     switch (func3) {
     case 0: // 000
-      mnemonic = "LB";
       op = MNE::LB;
       break;
     case 1: // 001
-      mnemonic = "LH";
       op = MNE::LH;
       break;
     case 2: // 010
-      mnemonic = "LW";
       op = MNE::LW;
       break;
     case 4: // 100
-      mnemonic = "LBU";
       op = MNE::LBU;
       break;
     case 5: // 101
-      mnemonic = "LHU";
       op = MNE::LHU;
       break;
     }
@@ -147,15 +125,12 @@ instruction_t::instruction_t(uint32_t ins, unsigned long int add) {
 
     switch (func3) {
     case 0: // 000
-      mnemonic = "SB";
       op = MNE::SB;
       break;
     case 1: // 001
-      mnemonic = "SH";
       op = MNE::SH;
       break;
     case 2: // 010
-      mnemonic = "SW";
       op = MNE::SW;
       break;
     }
@@ -169,32 +144,24 @@ instruction_t::instruction_t(uint32_t ins, unsigned long int add) {
     imm = (ins >> 20) & 4095; // 12 bits imm
     switch (func3) {
     case 0: // 000
-      mnemonic = "ADDI";
       op = MNE::ADDI;
-      // printf("ADDI imm: %d\n", sign_extend(imm, 12));
       break;
     case 2: // 010
-      mnemonic = "SLTI";
       op = MNE::SLTI;
       break;
     case 3: // 011
-      mnemonic = "SLTIU";
       op = MNE::SLTIU;
       break;
     case 4: // 100
-      mnemonic = "XORI";
       op = MNE::XORI;
       break;
     case 6: // 110
-      mnemonic = "ORI";
       op = MNE::ORI;
       break;
     case 7: // 111
-      mnemonic = "ANDI";
       op = MNE::ANDI;
       break;
     case 1: // 001
-      mnemonic = "SLLI";
       op = MNE::SLLI;
       shammt = (ins >> 20) & 31; // 5 bits de shift
       break;
@@ -202,10 +169,8 @@ instruction_t::instruction_t(uint32_t ins, unsigned long int add) {
       shammt = (ins >> 20) & 31;     // 5 bits de shift
       int func7 = (ins >> 25) & 127; // 7 bits func7
       if (func7 == 0) {
-        mnemonic = "SRLI";
         op = MNE::SRLI;
       } else if (func7 == 32) {
-        mnemonic = "SRAI";
         op = MNE::SRAI;
       }
       break;
@@ -223,35 +188,27 @@ instruction_t::instruction_t(uint32_t ins, unsigned long int add) {
     if (func7 == 1) { // Multiplicação e divisão
       switch (func3) {
       case 0: // 000
-        mnemonic = "MUL";
         op = MNE::MUL;
         break;
       case 1: // 001
-        mnemonic = "MULH";
         op = MNE::MULH;
         break;
       case 2: // 010
-        mnemonic = "MULHSU";
         op = MNE::MULHSU;
         break;
       case 3: // 011
-        mnemonic = "MULHU";
         op = MNE::MULHU;
         break;
       case 4: // 100
-        mnemonic = "DIV";
         op = MNE::DIV;
         break;
       case 5: // 101
-        mnemonic = "DIVU";
         op = MNE::DIVU;
         break;
       case 6: // 110
-        mnemonic = "REM";
         op = MNE::REM;
         break;
       case 7: // 111
-        mnemonic = "REMU";
         op = MNE::REMU;
         break;
       }
@@ -259,44 +216,34 @@ instruction_t::instruction_t(uint32_t ins, unsigned long int add) {
       switch (func3) {
       case 0: // 000
         if (func7 == 0) {
-          mnemonic = "ADD";
           op = MNE::ADD;
         } else if (func7 == 32) {
-          mnemonic = "SUB";
           op = MNE::SUB;
         }
         break;
       case 1: // 001
-        mnemonic = "SLL";
         op = MNE::SLL;
         break;
       case 2: // 010
-        mnemonic = "SLT";
         op = MNE::SLT;
         break;
       case 3: // 011
-        mnemonic = "SLTU";
         op = MNE::SLTU;
         break;
       case 4: // 100
-        mnemonic = "XOR";
         op = MNE::XOR;
         break;
       case 5: // 101
         if (func7 == 0) {
-          mnemonic = "SRL";
           op = MNE::SRL;
         } else if (func7 == 32) {
-          mnemonic = "SRA";
           op = MNE::SRA;
         }
         break;
       case 6: // 110
-        mnemonic = "OR";
         op = MNE::OR;
         break;
       case 7: // 111
-        mnemonic = "AND";
         op = MNE::AND;
         break;
       }
@@ -311,10 +258,8 @@ instruction_t::instruction_t(uint32_t ins, unsigned long int add) {
     imm = (ins >> 20) & 4095; // 12 bits imm
 
     if (func3 == 0) {
-      mnemonic = "FENCE";
       op = MNE::FENCE;
     } else if (func3 == 1) {
-      mnemonic = "FENCE.I";
       op = MNE::FENCEI;
     }
     break; // Sync
@@ -329,51 +274,40 @@ instruction_t::instruction_t(uint32_t ins, unsigned long int add) {
     switch (func3) {
     case 0: // 000
       if (imm == 0) {
-        mnemonic = "SCALL";
         op = MNE::SCALL;
       } else if (imm == 1) {
-        mnemonic = "SBREAK";
         op = MNE::SBREAK;
       }
       break;
     case 1: // 001
-      mnemonic = "RDCYCLE";
       op = MNE::RDCYCLE;
       break;
     case 2: // 010
-      mnemonic = "RDCYCLEH";
       op = MNE::RDCYCLEH;
       break;
     case 3: // 011
-      mnemonic = "RDTIME";
       op = MNE::RDTIME;
       break;
     case 5: // 101
-      mnemonic = "RDTIMEH";
       op = MNE::RDTIMEH;
       break;
     case 6: // 110
-      mnemonic = "RDINSTRRET";
       op = MNE::RDINSTRRET;
       break;
     case 7: // 111
-      mnemonic = "RDINSTRETH";
       op = MNE::RDINSTRETH;
       break;
     }
     break; // System/Counters
   }
   default:
-    if (debug)
-      printf("Invalid Opcode\n");
+    break;
   }
 }
 
 MNE instruction_t::getOperation() { return op; }
 
 INST_TYPE instruction_t::getType() { return type; }
-
-std::string instruction_t::getMnemonic() { return mnemonic; }
 
 uint32_t instruction_t::getOPCode() { return opcode; }
 
@@ -417,9 +351,5 @@ uint32_t instruction_t::getShammt() { return shammt; }
 uint32_t instruction_t::getInsCycle() { return cycle; }
 
 unsigned long int instruction_t::getInsAddress() { return address; }
-
-std::string instruction_t::PrintInstruction() {
-  return std::string(disassembly);
-}
 
 uint32_t instruction_t::getIns() { return inst; }
