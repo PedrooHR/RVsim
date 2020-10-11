@@ -16,5 +16,6 @@ Nenhuma biblioteca adicional foi utilizada, nem mesmo para o *parsing* do arquiv
 
 Para compilar:
 `g++ rvsim/*.cpp libs/*.cpp -I include/ -o rvsim_exe`
+
 Para Executar:
 `rvsim_exe <elf_file>`
