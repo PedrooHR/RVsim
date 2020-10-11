@@ -1,1 +1,0 @@
-/usr/bin/c++ -o rvsim  ../libs/libutils.a ../libs/libmemory.a ../libs/libisa.a ../libs/libregisters.a ../libs/libprocessor.a ../libs/libutils.a ../libs/libmemory.a ../libs/libisa.a ../libs/libregisters.a 
