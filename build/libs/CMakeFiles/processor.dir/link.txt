@@ -1,0 +1,2 @@
+/usr/bin/ar qc libprocessor.a 
+/usr/bin/ranlib libprocessor.a

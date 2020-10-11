@@ -1,0 +1,2 @@
+/usr/bin/ar qc libutils.a 
+/usr/bin/ranlib libutils.a

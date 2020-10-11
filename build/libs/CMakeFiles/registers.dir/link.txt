@@ -1,0 +1,2 @@
+/usr/bin/ar qc libregisters.a 
+/usr/bin/ranlib libregisters.a
