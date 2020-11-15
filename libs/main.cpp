@@ -31,16 +31,16 @@ int main(int argc, char** argv) {
     for (int j = 0; j < s_size; j += 4) {
       int32_t base_address = s_addr + j;
       if (base_address >= 0) {
-        memory.writeMem(base_address, elf_bytes[s_offset + j]);
-        memory.writeMem(base_address + 1, elf_bytes[s_offset + j + 1]);
-        memory.writeMem(base_address + 2, elf_bytes[s_offset + j + 2]);
-        memory.writeMem(base_address + 3, elf_bytes[s_offset + j + 3]);
+        memory.writeMem(base_address, elf_bytes[s_offset + j], ACCESS_TYPE::LOAD);
+        memory.writeMem(base_address + 1, elf_bytes[s_offset + j + 1], ACCESS_TYPE::LOAD);
+        memory.writeMem(base_address + 2, elf_bytes[s_offset + j + 2], ACCESS_TYPE::LOAD);
+        memory.writeMem(base_address + 3, elf_bytes[s_offset + j + 3], ACCESS_TYPE::LOAD);
       }
     }
   }
 
   // Executa o simulador
-  processor_t processor(&memory, entry_point);
+  processor_t processor(&memory, entry_point, 4);
   processor.executeProgram();
 
   return 0;

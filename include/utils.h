@@ -10,7 +10,8 @@
 enum class INST_TYPE : int { R = 0, I, S, SB, U, UJ };
 
 enum class MNE : int {
-  LB = 0,
+  // Instruções que usam a AGU
+  LB = 100,
   LH,
   LW,
   LBU,
@@ -18,7 +19,8 @@ enum class MNE : int {
   SB,
   SH,
   SW,
-  SLL,
+  // Instruções que usam a ALU
+  SLL = 200,
   SLLI,
   SRL,
   SRLI,
@@ -38,8 +40,17 @@ enum class MNE : int {
   SLT,
   SLTI,
   SLTU,
-  SLTIU,
-  BEQ,
+  SLTIU, 
+  MUL,
+  MULH,
+  MULHSU,
+  MULHU,
+  DIV,
+  DIVU,
+  REM,
+  REMU,
+  // Instruções que usam a BRU
+  BEQ = 300,
   BNE,
   BLT,
   BGE,
@@ -47,7 +58,8 @@ enum class MNE : int {
   BGEU,
   JAL,
   JALR,
-  FENCE,
+  // Instruções que atualmente não fazem nada
+  FENCE = 400,
   FENCEI,
   SCALL,
   SBREAK,
@@ -56,15 +68,7 @@ enum class MNE : int {
   RDTIME,
   RDTIMEH,
   RDINSTRRET,
-  RDINSTRETH,
-  MUL,
-  MULH,
-  MULHSU,
-  MULHU,
-  DIV,
-  DIVU,
-  REM,
-  REMU
+  RDINSTRETH
 };
 
 uint32_t sign_extend(uint32_t value, uint8_t bits);

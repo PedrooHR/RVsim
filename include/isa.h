@@ -20,6 +20,7 @@ private:
   int cycle;
 
 public:
+  instruction_t();
   instruction_t(uint32_t ins, unsigned long int add);
 
   MNE getOperation();

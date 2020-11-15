@@ -9,10 +9,41 @@ Nenhuma biblioteca adicional foi utilizada, nem mesmo para o *parsing* do arquiv
 ## Compilando e executando o programa
 
 Para compilar:
-`g++ libs/*.cpp -I include/ -o rvsim`
+`make $DINERO_INSTALL_DIR=<dinero-install-dir>`
 
 Para Executar:
 `./rvsim <elf_program>`
+
+## Sobre o simulador
+
+Nesta versão, o simulador simula também a temporização gasta durante a execução do programa. Bugs nas instruções de LBU e LHU foram consertados.
+
+Apesar de o simulador não simular todos os estágios de pipeline, os seguinte formato é representado (lembrando que esses estágios podem ainda conter sub-estágios), lembrando que o processador é super-escalar, testado para até 4 instruções simultâneas:
+
+***TODO***: Colocar diagrama dos estágios de pipeline.
+
+**Estágios levados em consideração:**
+
+- `FETCH`: Busca até 4 instruções, possui branch predictor gshare e assume que o hardware é capaz de distinguir que é uma instrução de salto, funciona para Branches e Jumps.  
+- `DECODE`: Simula um decode simples para RISC-V.
+- `ALLOCATION`: Assume que utilizou-se register renaming para evitar dependências *NOME*.
+- `ISSUE`: Controla a ordem de execução das instruções, dependências do tipo Read-after-Write (que não são corrigidas por register renaming) e distribui de acordo com as unidades funcionais disponíveis
+- `EXECUTE`: Executa cada instrução (não executa instruções provenientes de saltos errados).
+- `COMMIT`: determina o final de cada instrução. 
+
+**Temporização de cada estágio:**
+
+- `FETCH`: Base de 4 ciclos para fazer o fetch de 4 instruções*.
+- `DECODE`: 1 ciclo para execução do decode simples.
+- `ALLOCATION`: 1 ciclo, assumindo que é o tempo necessário para realizar o register renaming.
+- `ISSUE`: 1 ciclo, assumindo que é o tempo necessário para alocação dos recursos e ordenação das instruções.
+- `EXECUTE`: 1 ciclo para cada unidade funcional utilizada, mais 1 ciclo se tiver acesso a memória*.
+- `COMMIT`: 1 ciclo para reoordenar as instruções para terminá-las na ordem correta.
+
+\* 10 ciclos adicionais se acontecer um miss na L1i ou L1d, 50 ciclos adicionais se acontecer um miss na L2 e 100 ciclos adicionais se acontecer um miss na L3.
+
+**Configuração do simulador:**
+***TODO***
 
 ## Observações:
 

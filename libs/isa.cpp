@@ -4,6 +4,22 @@
 
 #include "utils.h"
 
+instruction_t::instruction_t() {  
+  address = 0;
+  inst = 0;
+  opcode = 0 & 127; // 7 bits de opcode
+  rd = -1;
+  rd = -1;
+  rs1 = -1;
+  rs2 = -1;
+  func3 = -1;
+  func7 = -1;
+  imm = -1;
+  shammt = -1;
+  cycle = 1; // Atualmente todas instruções levam 1 ciclo
+  op = MNE::FENCEI;
+}
+
 instruction_t::instruction_t(uint32_t ins, unsigned long int add) {
   address = add;
   inst = ins;
@@ -17,7 +33,8 @@ instruction_t::instruction_t(uint32_t ins, unsigned long int add) {
   imm = -1;
   shammt = -1;
   cycle = 1; // Atualmente todas instruções levam 1 ciclo
-  
+  op = MNE::FENCEI;
+
   // INSTRUCTION DECODE
   // Atualmente no IM temos 11 OPCODES
   switch (opcode) {
