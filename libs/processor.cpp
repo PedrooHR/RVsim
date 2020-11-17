@@ -1,15 +1,38 @@
 #include "processor.h"
 
+#include <cstring>
+
 #include <algorithm>
 #include <bitset>
 #include <iomanip>
 #include <iostream>
+#include <string>
 
 #include "utils.h"
 
-//// IMPORTANTE: SEGUNDO A ESPECIFICAÇÃO, TODO IMEDIATO É SIGN-EXTENDED
+// VARIAVEIS DE AMBIENTE QUE CONTROLAM IMPRESSAO
+bool PRINT_INSTRUCTION_LOG = false;
+bool PRINT_INSTRUCTION_END_TIME = false;
+bool PRINT_CACHE_MISSES_LOG = false;
+bool PRINT_GSHARE_LOG = false;
 
 processor_t::processor_t(memory_t *mem, uint32_t entry_point, int n_ins) {
+  // Ve se deseja imprimir o log de instruções
+  if (char *env = getenv("PRINT_INSTRUCTION_LOG")) 
+    if (strcmp(env, "true") == 0) 
+      PRINT_INSTRUCTION_LOG = true;
+  if (char *env = getenv("PRINT_INSTRUCTION_END_TIME")) 
+    if (strcmp(env, "true") == 0) 
+      PRINT_INSTRUCTION_END_TIME = true;
+  // Ve se deseja imprimir o log de misses da cache
+  if (char *env = getenv("PRINT_CACHE_MISSES_LOG")) 
+    if (strcmp(env, "true") == 0) 
+      PRINT_CACHE_MISSES_LOG = true;
+  // Ve se deseja imprimir o log do gshare
+  if (char *env = getenv("PRINT_GSHARE_LOG")) 
+    if (strcmp(env, "true") == 0) 
+      PRINT_GSHARE_LOG = true;
+
   memory = mem;
   PC = entry_point;
   gshare = new gshare_t(10, 1024);
@@ -18,173 +41,183 @@ processor_t::processor_t(memory_t *mem, uint32_t entry_point, int n_ins) {
 
   number_i = (n_ins > 0) ? n_ins : 1;
 
-  // Inicialização das variáveis de controle da simulação
-  used = new bool[number_i];
-  pred = new bool[number_i];
-  ri = new uint32_t[number_i];
-  pc = new uint32_t[number_i];
-  cycles = new uint32_t[number_i];
-  ds = new std::string[number_i];
-  d = new char *[number_i];
-  for (int i = 0; i < number_i; i++)
-    d[i] = new char[50];
-  ins = new instruction_t[number_i];
+  ALU.clear();
+  ALU.resize(NUMBER_OF_ALU, 0);
+  AGU.clear();
+  AGU.resize(NUMBER_OF_AGU, 0);
+  BRU.clear();
+  BRU.resize(NUMBER_OF_BRU, 0);
+  memory_avail = 0;
 }
 
 void processor_t::executeProgram() {
   running = true;
   uint32_t tcycles = 0, tinst = 0;
-
+  uint32_t previous_finish = 0;
+  uint32_t branch_penalty = 0;
+  uint32_t linst = 0;
+  uint32_t commit_count = 0;
   while (running) {
-    // Reinicio das váriaveis de controle
-    for (int i = 0; i < number_i; i++) {
-      used[i] = false;
-      pred[i] = false;
-    }
-    // ====================================================================== //
-    // ESTAGIO DE FETCH
-    // ====================================================================== //
-    // O estágio de fetch é normalmente divido em 4 outros estágios levando
-    // normalmente 4 ciclos para a execução, se a instrução estiver fora da
-    // cache de instruções, temos 10 ciclos adicionais para consultar a cache
-    // L2, se tiver miss na L2, mais 30 ciclos para checar a L3 e caso haja miss
-    // na L3, mais 100 ciclos para checar a memoria RAM.
-    for (int i = 0; i < number_i; i++)
-      cycles[i] = Fetch(&ri[i], &pc[i], &pred[i]);
+    // Devolve o ciclo em que o fetch é feito
+    uint32_t time_instruction = (linst / number_i) + branch_penalty; 
+    uint32_t instruction_start = time_instruction;
 
-    // TODO: Perguntar se como conseguimos fazer o fetch de 4 instruções, se
-    // fazemos uma depois da outra e contam o ciclos de pegar todas as
-    // instruções, ou se contabilizamos só a mais longa (ex: se temos dois
-    // acessos a ram para pegar o valor da instrução e colocar na cache)
-
-    // Sempre haverá pelo menos uma instrução
-    uint32_t c_max = cycles[0];
-    for (int i = 0; i < number_i; i++)
-      c_max = (c_max > cycles[i]) ? c_max : cycles[i];
-    tcycles += c_max;
+    // ====================================================================== //
+    // ESTAGIO DE FETCH (min 4 ciclos)
+    // ====================================================================== //
+    uint32_t raw_instruction, pc_instruction;
+    bool prediction;
+    time_instruction += Fetch(&raw_instruction, &pc_instruction, &prediction);
 
     // ====================================================================== //
     // ESTAGIO DE DECODE
     // ====================================================================== //
-    // O estágio de decode do RISC-V é bem simples, como as instruções tem
-    // tamanho fixo, podemos fazer o decode todo numa única vez, então gastamos
-    // 1 ciclos para fazer o decode.
-    for (int i = 0; i < number_i; i++) {
-      instruction_t p(ri[i], pc[i]);
-      ins[i] = p;
-    }
-
-    // Aqui temos a mesma pergunta, a principio, temos hardware pra fazer decode
-    // de (até) 4 instruções
-    tcycles += 1;
+    time_instruction += BASE_DECODE_DURATION;
+    instruction_t instruction(raw_instruction, pc_instruction);
 
     // ====================================================================== //
     // ESTAGIO DE ALLOCATION
     // ====================================================================== //
-    // No estágio de allocation fazemos register renaming, aqui não precisamos
-    // necessáriamente fazer register renaming, mas podemos assumir que as
-    // instruções podem ser executadas em qualquer ordem, desde que não tenham
-    // uma dependencia do tipo leitura após escrita. (read after write)
-    // Vamos assumir que o register renaming é feito mas não implementá-lo
-    // explicitamente. Com isso, estamos livres de todas as dependencias de
-    // NOME
-
-    // TODO: conferir se podemos assumir que o renaming sempre vai ser 1 ciclo
-    tcycles += 1;
+    time_instruction += BASE_ALLOC_DURATION;
 
     // ====================================================================== //
-    // ESTAGIO DE ISSUE
+    // ESTAGIO DE ISSUE (3 ciclos)
     // ====================================================================== //
-    // No estágio de Issue verifica-se os recursos que estão disponíveis e
-    // alocamos o que vai ser usado pra executar cada instrução. Estamos
-    // assumindo que o processador é fora de ordem e que register renaming é
-    // feito, mas ainda precisamos alocar as instruções de acordo com os
-    // recursos disponíveis e as dependencias que não são de NOME.
-    // Vamos considerar que as instruções podem ser executadas fora de ordem
-    // e que o reoordering vai ser feito no estágio de commit
+    uint32_t rs1 = instruction.getRs1();
+    uint32_t rs2 = instruction.getRs2();
+    uint32_t rd  = instruction.getRd();
+    FU fu = instruction.getFU();
+    // Dependência de dados
+    uint32_t rs1_avail = (rs1 != -1) ? registers.checkUW(rs1) : 0;
+    uint32_t rs2_avail = (rs2 != -1) ? registers.checkUW(rs2) : 0;
 
-    // TODO
+    // Indendependente das dependencias, temos pelo menos 3 ciclos
+    time_instruction += BASE_ISSUE_DURATION;  
+    
+    // Se tiver alguma dependência de dados, vamos postegar o inicio.
+    if (rs1_avail > time_instruction || rs2_avail > time_instruction) 
+      time_instruction = std::max(rs1_avail, rs2_avail); 
 
-    // ====================================================================== //
-    // ESTAGIO DE EXECUÇÃO
-    // ====================================================================== //
-    // O estágio de execução é responsável por executar todas as instruções
-    // Descartamos as instruções subsequentes em caso de uma predição de salto
-    // falhar.
-    // Vamos executar todas as instruções em ordem para que o resultado da
-    // simulação seja correto, apesar de estarmos considerando register renaming
-    //
-
-    // Modelo com branch prediction
-    // Sempre executamos a primeira instrução
-    used[0] = true;
-    for (int i = 0; i < number_i; i++) {
-      if (used[i]) {
-        // Executa a instrução e cria a linha de log
-        cycles[i] = Execute(ins[i], d[i]);
-        ds[i] = doLogLine(ins[i], d[i]);
-        // Verificamos se a instruções foi uma branch, se sim, precisamos
-        // devolver o feedback para o gshare
-        if (is_branch) {
-          // se acertarmos a predição de salto, vamos executar a próxima
-          // instrução, se não, vamos eliminar todas as próximas instruções do
-          // bloco
-          if (branched == pred[i])
-            if (i < 3)
-              used[i + 1] = true;
-          // devolve o feedback pro gshare
-          gshare->feedback(branched, pc[i], PC);
-        } else {
-          // Se não for a instrução de encerrar o programa, como não temos um
-          // branch, vamos executar a próxima instrução.
-          if (running)
-            if (i < 3)
-              used[i + 1] = true;
-        }
-      }
+    uint32_t res_avail;
+    bool mem_acess = false;
+    switch (fu) {
+      case FU::ALU: 
+        res_avail = getNextALU(time_instruction);
+        break;
+      case FU::AGU:
+        mem_acess = true;
+        res_avail = getNextAGU(time_instruction);
+        break;
+      case FU::BRU:
+        res_avail = getNextBRU(time_instruction);
+        break;
+      case FU::NONE:
+        break;
     }
 
-    // ====================================================================== //
-    // CONTABILIZAÇÃO DOS CICLOS NA EXECUÇÃO
-    // (SIMULA O CONTROLE FEITO DO ESTAGIO DE ISSUE)
-    // ====================================================================== //
-    // Temos duas questões a verificar, a primeira é relação de dependencias,
-    // a outra é se temos uma operação de load/store, como estamos falando de
-    // um processador in-order, as operações de load/store demoram mais que 1
-    // ciclo. Também tem que verificar
-
-    // TODO
+    // se res_avail <= time instruction significa que temos uma unidade
+    // funcional disponível assim que a parte de issue acabar, se res_avail >
+    // time_instruction significa que só teremos recursos disponíveis a partir
+    // de res_avail, então a instrução fica em stall até lá.
+    if (res_avail > time_instruction)
+      time_instruction = res_avail;
 
     // ====================================================================== //
-    // ESTAGIO DE COMMIT
+    // ESTAGIO DE EXECUÇÃO (min 2 ciclos)
     // ====================================================================== //
-    // No estágio de commit vamos assumir que o reoordering é feito, no caso, 
-    // se a impressão de instruções estiver ligada, vamos imprimir a ordem 
-    // correta de execução.
-    for (int i = 0; i < number_i; i++) {
-      if (used[i]) {
-        tinst++;
-        // std::cout << ds[i] << std::endl;
+    time_instruction += BASE_EXECUTE_DURATION;
+    // Executa a instrução e cria a linha de log
+    char disassembly[50];
+    uint32_t extra_cicles = Execute(instruction, disassembly);
+    std::string instruction_log = doLogLine(instruction, disassembly);
+
+    // Feedback gshare
+    if (is_branch) {
+      // Acerto
+      if (branched != prediction) {
+        // Penalidade pelo erro - Cada vez que erramos significa que perdemos um
+        // tanto de ciclos
+        branch_penalty += BRANCH_PREDICTION_PEN;
+        linst = ((linst / number_i) + 1) * number_i;
       }
+      gshare->feedback(branched, pc_instruction, PC);
     }
-    tcycles += 1;
+    
+    if (mem_acess) {
+      // remove o write back temporariamente
+      time_instruction -= 1;
+      // Teremos extra_cicles se for acesso a MEM
+      uint32_t mem_avail = getNextMEM(time_instruction, extra_cicles);
+      // se mem_avail > time_instruction, significa que o recurso de memoria
+      // está ocupado, temos que esperar, assim o tempo de
+      if (mem_avail > time_instruction)
+        time_instruction = mem_avail;
+
+      // Adiciona os ciclos extras de acesso a memória
+      time_instruction += extra_cicles;
+
+      // Readiciona o writeback
+      time_instruction += 1;
+    }
+
+    // Write back 
+    if (wrote)
+      // -1 assumindo que se le no mesmo ciclo que se escreve
+      registers.setUW(rd, time_instruction - 1);
 
     // ====================================================================== //
-    cycle += tcycles;
+    // ESTAGIO DE COMMIT (1 ciclo)
+    // ====================================================================== //
+    time_instruction += BASE_COMMIT_DURATION;
+    uint32_t commited_at;
+    // Checa commit da instrução
+    if (time_instruction > previous_finish) {
+      commited_at = time_instruction;
+      previous_finish = time_instruction;
+      commit_count = 1;
+    } else {
+      commit_count++;
+      if (commit_count > 4) {
+        commit_count = 1;
+        previous_finish += BASE_COMMIT_DURATION;
+      }
+      commited_at = previous_finish;
+    }
+
+    // Contador de instruções
+    tinst++;
+    linst++;
+
+    // Imprime log da instrução
+    if (PRINT_INSTRUCTION_LOG) {
+      std::cout << std::left << std::setw(93) << instruction_log;
+      if (PRINT_INSTRUCTION_END_TIME) {
+        std::cout << " | FINISHED AT: " << std::setw(5) << time_instruction;
+        std::cout << "| COMMITED AT: " << std::setw(5) << commited_at;
+      }
+      std::cout << std::endl;
+    }
+    // ====================================================================== //
   }
-  std::cout << "Total number of cycles: " << cycle << std::endl;
-  std::cout << "Total number of instructions: " << tinst << std::endl;
-  std::cout << "gshare->getHits(): " << gshare->getHits() << std::endl;
-  std::cout << "gshare->getErrors(): " << gshare->getErrors() << std::endl;
-  std::cout << "memory->printCacheMisses(): " << std::endl;
-  memory->printCacheMisses();
+  std::cout << "\nINFORMAÇÕES SOBRE CICLOS E #INSTRUÇÕES:\n";
+  std::cout << "  Total number of cycles: " << previous_finish << std::endl;
+  std::cout << "  Total number of instructions: " << tinst << std::endl;
+  if (PRINT_GSHARE_LOG) {
+    std::cout << "\nINFORMAÇÕES SOBRE GSHARE:\n";
+    std::cout << "  Acertos: " << gshare->getHits() << std::endl;
+    std::cout << "  Erros: " << gshare->getErrors() << std::endl;
+  }
+  if (PRINT_CACHE_MISSES_LOG) {
+    std::cout << "\nINFORMAÇÕES SOBRE MISSES NAS CACHES:\n";
+    memory->printCacheMisses();
+  }
 }
 
 uint32_t processor_t::Fetch(uint32_t *raw_instruction, uint32_t *pc_address,
                             bool *pred) {
   // Fetch do PC atual
   uint8_t mem_value;
-  uint32_t lcycles = 4;
+  uint32_t lcycles = BASE_FETCH_DURATION;
   uint32_t value = 0;
   for (int i = 0; i < 4; i++) {
     lcycles += memory->readMem(PC + i, &mem_value, ACCESS_TYPE::INSTRUCTION);
@@ -230,15 +263,17 @@ uint32_t processor_t::Fetch(uint32_t *raw_instruction, uint32_t *pc_address,
 uint32_t processor_t::Execute(instruction_t ins, char *disassembly) {
   // Todas as unidades funcionais precisam de pelo menos 1 ciclo pra execução,
   // acessos a memória podem demorar mais.
-  uint32_t lcycle = 1;
+  uint32_t lcycle = 0;
   // Branched controla se a instrução fez uma branch ou não, se sim, precisamos
   // invalidar as instruções subsequentes que fazem parte do mesmo block
   branched = false;
   is_branch = false;
+  wrote = false;
   switch (ins.getOperation()) {
   case MNE::LUI: { // Coloca o imediato no rd (preenche os 12 lower bits com 0)
     int32_t imm_se = sign_extend(ins.getImm(), ins.getImmSize());
     registers.writeReg(ins.getRd(), imm_se);
+    wrote = true;
     sprintf(disassembly, "%-8s %s, %d", "LUI",
             register_name[ins.getRd()].c_str(), imm_se);
     break;
@@ -247,6 +282,7 @@ uint32_t processor_t::Execute(instruction_t ins, char *disassembly) {
                      // rd (preenche os 12 lower bits com 0)
     int32_t imm_se = sign_extend(ins.getImm(), ins.getImmSize());
     registers.writeReg(ins.getRd(), imm_se + ins.getInsAddress());
+    wrote = true;
     sprintf(disassembly, "%-8s %s, %d", "AUIPC",
             register_name[ins.getRd()].c_str(), imm_se);
     break;
@@ -264,6 +300,7 @@ uint32_t processor_t::Execute(instruction_t ins, char *disassembly) {
     }
     value = sign_extend(value, 8);
     registers.writeReg(ins.getRd(), value);
+    wrote = true;
     sprintf(disassembly, "%-8s %s, %s, %d", "LB",
             register_name[ins.getRd()].c_str(),
             register_name[ins.getRs1()].c_str(), imm_se);
@@ -282,6 +319,7 @@ uint32_t processor_t::Execute(instruction_t ins, char *disassembly) {
     }
     value = sign_extend(value, 16);
     registers.writeReg(ins.getRd(), value);
+    wrote = true;
     sprintf(disassembly, "%-8s %s, %s, %d", "LH",
             register_name[ins.getRd()].c_str(),
             register_name[ins.getRs1()].c_str(), imm_se);
@@ -299,6 +337,7 @@ uint32_t processor_t::Execute(instruction_t ins, char *disassembly) {
       value += mem_value << (8 * i);
     }
     registers.writeReg(ins.getRd(), value);
+    wrote = true;
     sprintf(disassembly, "%-8s %s, %s, %d", "LW",
             register_name[ins.getRd()].c_str(),
             register_name[ins.getRs1()].c_str(), imm_se);
@@ -316,6 +355,7 @@ uint32_t processor_t::Execute(instruction_t ins, char *disassembly) {
       value += mem_value << (8 * i);
     }
     registers.writeReg(ins.getRd(), value);
+    wrote = true;
     sprintf(disassembly, "%-8s %s, %s, %d", "LBU",
             register_name[ins.getRd()].c_str(),
             register_name[ins.getRs1()].c_str(), imm_se);
@@ -333,6 +373,7 @@ uint32_t processor_t::Execute(instruction_t ins, char *disassembly) {
       value += mem_value << (8 * i);
     }
     registers.writeReg(ins.getRd(), value);
+    wrote = true;
     sprintf(disassembly, "%-8s %s, %s, %d", "LHU",
             register_name[ins.getRd()].c_str(),
             register_name[ins.getRs1()].c_str(), imm_se);
@@ -386,6 +427,7 @@ uint32_t processor_t::Execute(instruction_t ins, char *disassembly) {
     uint32_t shammt = registers.readReg(ins.getRs2()) & 31;
     uint32_t value = registers.readReg(ins.getRs1()) << shammt;
     registers.writeReg(ins.getRd(), value);
+    wrote = true;
     sprintf(disassembly, "%-8s %s, %s, %s", "SLL",
             register_name[ins.getRd()].c_str(),
             register_name[ins.getRs1()].c_str(),
@@ -395,6 +437,7 @@ uint32_t processor_t::Execute(instruction_t ins, char *disassembly) {
   case MNE::SLLI: { // shift rs1 left shammt e guarda e rd
     uint32_t value = registers.readReg(ins.getRs1()) << ins.getShammt();
     registers.writeReg(ins.getRd(), value);
+    wrote = true;
     sprintf(disassembly, "%-8s %s, %s, %d", "SLLI",
             register_name[ins.getRd()].c_str(),
             register_name[ins.getRs1()].c_str(), ins.getShammt());
@@ -404,6 +447,7 @@ uint32_t processor_t::Execute(instruction_t ins, char *disassembly) {
     uint32_t shammt = registers.readReg(ins.getRs2()) & 31;
     uint32_t value = registers.readReg(ins.getRs1()) >> shammt;
     registers.writeReg(ins.getRd(), value);
+    wrote = true;
     sprintf(disassembly, "%-8s %s, %s, %s", "SRL",
             register_name[ins.getRd()].c_str(),
             register_name[ins.getRs1()].c_str(),
@@ -423,6 +467,7 @@ uint32_t processor_t::Execute(instruction_t ins, char *disassembly) {
     uint32_t value = registers.readReg(ins.getRs1()) >> shammt;
     value = sign_extend(value, 32 - shammt);
     registers.writeReg(ins.getRd(), value);
+    wrote = true;
     sprintf(disassembly, "%-8s %s, %s, %s", "SRA",
             register_name[ins.getRd()].c_str(),
             register_name[ins.getRs1()].c_str(),
@@ -433,6 +478,7 @@ uint32_t processor_t::Execute(instruction_t ins, char *disassembly) {
     int32_t value = registers.readReg(ins.getRs1()) >> ins.getShammt();
     value = sign_extend(value, 32 - ins.getShammt());
     registers.writeReg(ins.getRd(), value);
+    wrote = true;
     sprintf(disassembly, "%-8s %s, %s, %d", "SRAI",
             register_name[ins.getRd()].c_str(),
             register_name[ins.getRs1()].c_str(), ins.getShammt());
@@ -442,6 +488,7 @@ uint32_t processor_t::Execute(instruction_t ins, char *disassembly) {
     int32_t value = (int32_t)registers.readReg(ins.getRs1()) +
                     (int32_t)registers.readReg(ins.getRs2());
     registers.writeReg(ins.getRd(), value);
+    wrote = true;
     sprintf(disassembly, "%-8s %s, %s, %s", "ADD",
             register_name[ins.getRd()].c_str(),
             register_name[ins.getRs1()].c_str(),
@@ -452,6 +499,7 @@ uint32_t processor_t::Execute(instruction_t ins, char *disassembly) {
     int32_t imm_se = sign_extend(ins.getImm(), ins.getImmSize());
     int32_t value = (int32_t)registers.readReg(ins.getRs1()) + imm_se;
     registers.writeReg(ins.getRd(), value);
+    wrote = true;
     sprintf(disassembly, "%-8s %s, %s, %d", "ADDI",
             register_name[ins.getRd()].c_str(),
             register_name[ins.getRs1()].c_str(), imm_se);
@@ -461,6 +509,7 @@ uint32_t processor_t::Execute(instruction_t ins, char *disassembly) {
     int32_t value = (int32_t)registers.readReg(ins.getRs1()) -
                     (int32_t)registers.readReg(ins.getRs2());
     registers.writeReg(ins.getRd(), value);
+    wrote = true;
     sprintf(disassembly, "%-8s %s, %s, %s", "SUB",
             register_name[ins.getRd()].c_str(),
             register_name[ins.getRs1()].c_str(),
@@ -471,6 +520,7 @@ uint32_t processor_t::Execute(instruction_t ins, char *disassembly) {
     uint32_t value =
         registers.readReg(ins.getRs1()) ^ registers.readReg(ins.getRs2());
     registers.writeReg(ins.getRd(), value);
+    wrote = true;
     sprintf(disassembly, "%-8s %s, %s, %s", "XOR",
             register_name[ins.getRd()].c_str(),
             register_name[ins.getRs1()].c_str(),
@@ -481,6 +531,7 @@ uint32_t processor_t::Execute(instruction_t ins, char *disassembly) {
     int32_t imm_se = sign_extend(ins.getImm(), ins.getImmSize());
     uint32_t value = registers.readReg(ins.getRs1()) ^ imm_se;
     registers.writeReg(ins.getRd(), value);
+    wrote = true;
     sprintf(disassembly, "%-8s %s, %s, %d", "XORI",
             register_name[ins.getRd()].c_str(),
             register_name[ins.getRs1()].c_str(), imm_se);
@@ -490,6 +541,7 @@ uint32_t processor_t::Execute(instruction_t ins, char *disassembly) {
     uint32_t value =
         registers.readReg(ins.getRs1()) | registers.readReg(ins.getRs2());
     registers.writeReg(ins.getRd(), value);
+    wrote = true;
     sprintf(disassembly, "%-8s %s, %s, %s", "OR",
             register_name[ins.getRd()].c_str(),
             register_name[ins.getRs1()].c_str(),
@@ -500,6 +552,7 @@ uint32_t processor_t::Execute(instruction_t ins, char *disassembly) {
     int32_t imm_se = sign_extend(ins.getImm(), ins.getImmSize());
     uint32_t value = registers.readReg(ins.getRs1()) | imm_se;
     registers.writeReg(ins.getRd(), value);
+    wrote = true;
     sprintf(disassembly, "%-8s %s, %s, %d", "ORI",
             register_name[ins.getRd()].c_str(),
             register_name[ins.getRs1()].c_str(), imm_se);
@@ -509,6 +562,7 @@ uint32_t processor_t::Execute(instruction_t ins, char *disassembly) {
     uint32_t value =
         registers.readReg(ins.getRs1()) & registers.readReg(ins.getRs2());
     registers.writeReg(ins.getRd(), value);
+    wrote = true;
     sprintf(disassembly, "%-8s %s, %s, %s", "AND",
             register_name[ins.getRd()].c_str(),
             register_name[ins.getRs1()].c_str(),
@@ -519,6 +573,7 @@ uint32_t processor_t::Execute(instruction_t ins, char *disassembly) {
     int32_t imm_se = sign_extend(ins.getImm(), ins.getImmSize());
     uint32_t value = registers.readReg(ins.getRs1()) & imm_se;
     registers.writeReg(ins.getRd(), value);
+    wrote = true;
     sprintf(disassembly, "%-8s %s, %s, %d", "ANDI",
             register_name[ins.getRd()].c_str(),
             register_name[ins.getRs1()].c_str(), imm_se);
@@ -528,6 +583,7 @@ uint32_t processor_t::Execute(instruction_t ins, char *disassembly) {
     bool lessthan = (int32_t)registers.readReg(ins.getRs1()) <
                     (int32_t)registers.readReg(ins.getRs2());
     registers.writeReg(ins.getRd(), lessthan == true ? 1 : 0);
+    wrote = true;
     sprintf(disassembly, "%-8s %s, %s, %s", "SLT",
             register_name[ins.getRd()].c_str(),
             register_name[ins.getRs1()].c_str(),
@@ -538,6 +594,7 @@ uint32_t processor_t::Execute(instruction_t ins, char *disassembly) {
     int32_t imm_se = sign_extend(ins.getImm(), ins.getImmSize());
     bool lessthan = (int32_t)registers.readReg(ins.getRs1()) < imm_se;
     registers.writeReg(ins.getRd(), lessthan == true ? 1 : 0);
+    wrote = true;
     sprintf(disassembly, "%-8s %s, %s, %d", "SLTI",
             register_name[ins.getRd()].c_str(),
             register_name[ins.getRs1()].c_str(), imm_se);
@@ -547,6 +604,7 @@ uint32_t processor_t::Execute(instruction_t ins, char *disassembly) {
     bool lessthan =
         registers.readReg(ins.getRs1()) < registers.readReg(ins.getRs2());
     registers.writeReg(ins.getRd(), lessthan == true ? 1 : 0);
+    wrote = true;
     sprintf(disassembly, "%-8s %s, %s, %s", "SLTU",
             register_name[ins.getRd()].c_str(),
             register_name[ins.getRs1()].c_str(),
@@ -557,6 +615,7 @@ uint32_t processor_t::Execute(instruction_t ins, char *disassembly) {
     int32_t imm_se = sign_extend(ins.getImm(), ins.getImmSize());
     bool lessthan = registers.readReg(ins.getRs1()) < imm_se;
     registers.writeReg(ins.getRd(), lessthan == true ? 1 : 0);
+    wrote = true;
     sprintf(disassembly, "%-8s %s, %s, %d", "SLTIU",
             register_name[ins.getRd()].c_str(),
             register_name[ins.getRs1()].c_str(), imm_se);
@@ -640,6 +699,7 @@ uint32_t processor_t::Execute(instruction_t ins, char *disassembly) {
     is_branch = true;
     int32_t imm_se = sign_extend(ins.getImm(), ins.getImmSize());
     registers.writeReg(ins.getRd(), ins.getInsAddress() + 4);
+    wrote = true;
     PC = (uint32_t)((int32_t)ins.getInsAddress() + imm_se);
     branched = true;
     sprintf(disassembly, "%-8s %s, %d", "JAL",
@@ -650,6 +710,7 @@ uint32_t processor_t::Execute(instruction_t ins, char *disassembly) {
     is_branch = true;
     int32_t imm_se = sign_extend(ins.getImm(), ins.getImmSize());
     registers.writeReg(ins.getRd(), ins.getInsAddress() + 4);
+    wrote = true;
     PC = (uint32_t)((int32_t)registers.readReg(ins.getRs1()) + imm_se);
     branched = true;
     sprintf(disassembly, "%-8s %s, %s, %d", "JALR",
@@ -694,6 +755,7 @@ uint32_t processor_t::Execute(instruction_t ins, char *disassembly) {
                   (int32_t)registers.readReg(ins.getRs2());
     uint32_t value = (int32_t)res;
     registers.writeReg(ins.getRd(), value);
+    wrote = true;
     sprintf(disassembly, "%-8s %s, %s, %s", "MUL",
             register_name[ins.getRd()].c_str(),
             register_name[ins.getRs1()].c_str(),
@@ -706,6 +768,7 @@ uint32_t processor_t::Execute(instruction_t ins, char *disassembly) {
                   (int32_t)registers.readReg(ins.getRs2());
     uint32_t value = (int32_t)(res >> 32);
     registers.writeReg(ins.getRd(), value);
+    wrote = true;
     sprintf(disassembly, "%-8s %s, %s, %s", "MULH",
             register_name[ins.getRd()].c_str(),
             register_name[ins.getRs1()].c_str(),
@@ -718,6 +781,7 @@ uint32_t processor_t::Execute(instruction_t ins, char *disassembly) {
         registers.readReg(ins.getRs1()) * registers.readReg(ins.getRs2());
     uint32_t value = (uint32_t)(res >> 32);
     registers.writeReg(ins.getRd(), value);
+    wrote = true;
     sprintf(disassembly, "%-8s %s, %s, %s", "MULHU",
             register_name[ins.getRd()].c_str(),
             register_name[ins.getRs1()].c_str(),
@@ -731,6 +795,7 @@ uint32_t processor_t::Execute(instruction_t ins, char *disassembly) {
                   (uint32_t)registers.readReg(ins.getRs2());
     uint32_t value = (uint32_t)(res >> 32);
     registers.writeReg(ins.getRd(), value);
+    wrote = true;
     sprintf(disassembly, "%-8s %s, %s, %s", "MULHSU",
             register_name[ins.getRd()].c_str(),
             register_name[ins.getRs1()].c_str(),
@@ -741,6 +806,7 @@ uint32_t processor_t::Execute(instruction_t ins, char *disassembly) {
     int32_t value = (int32_t)registers.readReg(ins.getRs1()) /
                     (int32_t)registers.readReg(ins.getRs2());
     registers.writeReg(ins.getRd(), value);
+    wrote = true;
     sprintf(disassembly, "%-8s %s, %s, %s", "DIV",
             register_name[ins.getRd()].c_str(),
             register_name[ins.getRs1()].c_str(),
@@ -751,6 +817,7 @@ uint32_t processor_t::Execute(instruction_t ins, char *disassembly) {
     uint32_t value = (uint32_t)registers.readReg(ins.getRs1()) /
                      (uint32_t)registers.readReg(ins.getRs2());
     registers.writeReg(ins.getRd(), value);
+    wrote = true;
     sprintf(disassembly, "%-8s %s, %s, %s", "DIVU",
             register_name[ins.getRd()].c_str(),
             register_name[ins.getRs1()].c_str(),
@@ -767,6 +834,7 @@ uint32_t processor_t::Execute(instruction_t ins, char *disassembly) {
     else
       value_s = value;
     registers.writeReg(ins.getRd(), value_s);
+    wrote = true;
     sprintf(disassembly, "%-8s %s, %s, %s", "REM",
             register_name[ins.getRd()].c_str(),
             register_name[ins.getRs1()].c_str(),
@@ -777,6 +845,7 @@ uint32_t processor_t::Execute(instruction_t ins, char *disassembly) {
     uint32_t value = (uint32_t)registers.readReg(ins.getRs1()) %
                      (uint32_t)registers.readReg(ins.getRs2());
     registers.writeReg(ins.getRd(), value);
+    wrote = true;
     sprintf(disassembly, "%-8s %s, %s, %s", "REMU",
             register_name[ins.getRd()].c_str(),
             register_name[ins.getRs1()].c_str(),
@@ -813,6 +882,45 @@ std::string processor_t::doLogLine(instruction_t ins, char *disassembly) {
   // Disassembly (De acordo com os slides)
   out << disassembly;
   return out.str();
+}
+
+uint32_t processor_t::getNextALU(uint32_t time) {
+  int min = 0;
+  for (unsigned int i = 0; i < ALU.size(); i++) {
+    if (ALU[i] < ALU[min])
+      min = i;
+  }
+  int temp = ALU[min];
+  ALU[min] = ((temp < time) ? time : temp) + CICLES_ALU;
+  return temp;
+}
+
+uint32_t processor_t::getNextAGU(uint32_t time) {
+  int min = 0;
+  for (unsigned int i = 0; i < AGU.size(); i++) {
+    if (AGU[i] < AGU[min])
+      min = i;
+  }
+  int temp = AGU[min];
+  AGU[min] = ((temp < time) ? time : temp)  + CICLES_AGU;
+  return temp;
+}
+
+uint32_t processor_t::getNextBRU(uint32_t time) {
+  int min = 0;
+  for (unsigned int i = 0; i < BRU.size(); i++) {
+    if (BRU[i] < BRU[min])
+      min = i;
+  }
+  int temp = BRU[min];
+  BRU[min] = ((temp < time) ? time : temp)  + CICLES_BRU;
+  return temp;
+}
+
+uint32_t processor_t::getNextMEM(uint32_t time, uint32_t time_used) {
+  int temp = memory_avail;
+  memory_avail = ((temp < time) ? time : temp) + time_used;
+  return temp;
 }
 
 /***************************************************************************
@@ -936,6 +1044,10 @@ void gshare_t::feedback(bool branched, uint32_t pc, uint32_t address) {
   //           << std::endl;
 }
 
-int gshare_t::getHits() { return hits; }
+int gshare_t::getHits() { 
+  return hits; 
+}
 
-int gshare_t::getErrors() { return errors; }
+int gshare_t::getErrors() { 
+  return errors; 
+}

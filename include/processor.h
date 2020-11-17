@@ -35,27 +35,38 @@ public:
 };
 
 //============== PROCESSOR
+#define BASE_FETCH_DURATION     4
+#define BASE_DECODE_DURATION    1
+#define BASE_ALLOC_DURATION     1
+#define BASE_ISSUE_DURATION     3
+#define BASE_EXECUTE_DURATION   2
+#define BASE_COMMIT_DURATION    1
+
+#define BRANCH_PREDICTION_PEN   8
+
+#define NUMBER_OF_ALU           3
+#define NUMBER_OF_AGU           1
+#define NUMBER_OF_BRU           1
+#define CICLES_ALU              1
+#define CICLES_AGU              1
+#define CICLES_BRU              1
+
 class processor_t {
 private:
   gshare_t *gshare;
   memory_t *memory;
   registers_t registers;
+  std::vector<uint32_t> ALU;
+  std::vector<uint32_t> AGU;
+  std::vector<uint32_t> BRU;
+  uint32_t memory_avail;
   int cycle;
   int PC;
   bool running;
   int number_i;
   // variaveis relacionadas a branching
   bool branched = false, is_branch;
-
-  // Variaveis de controle da simulação
-  bool *used;
-  bool *pred;
-  uint32_t *ri;
-  uint32_t *pc;
-  uint32_t *cycles;
-  std::string *ds;
-  char **d;
-  instruction_t *ins;
+  bool wrote;
 
 public:
   processor_t(memory_t *mem, uint32_t entry_point, int n_ins);
@@ -65,6 +76,10 @@ public:
   uint32_t Fetch(uint32_t *raw_instruction, uint32_t *pc_address, bool *pred);
   uint32_t Execute(instruction_t ins, char *disassembly);
   std::string doLogLine(instruction_t ins, char *disassembly);
+  uint32_t getNextALU(uint32_t time);
+  uint32_t getNextAGU(uint32_t time);
+  uint32_t getNextBRU(uint32_t time);
+  uint32_t getNextMEM(uint32_t time, uint32_t time_used);
 };
 
 #endif

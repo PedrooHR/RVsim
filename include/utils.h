@@ -9,6 +9,8 @@
 
 enum class INST_TYPE : int { R = 0, I, S, SB, U, UJ };
 
+enum class FU : int { ALU = 0, AGU, BRU, NONE};
+
 enum class MNE : int {
   // Instruções que usam a AGU
   LB = 100,

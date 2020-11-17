@@ -8,6 +8,11 @@
 #include <map>
 #include <vector>
 
+#define L1_MISS_PENALTY   10
+#define L2_MISS_PENALTY   50
+#define L3_MISS_PENALTY   100
+
+// foward declaration
 typedef struct d4_cache_struct d4cache;
 
 enum class ACCESS_TYPE { INSTRUCTION, DATA, LOAD};

@@ -17,6 +17,7 @@ private:
   uint32_t opcode, rd, rs1, rs2, func3, func7, shammt;
   int32_t imm;
   MNE op;
+  FU fu;
   int cycle;
 
 public:
@@ -25,6 +26,7 @@ public:
 
   MNE getOperation();
   INST_TYPE getType();
+  FU getFU();
   uint32_t getOPCode();
   uint32_t getRd();
   uint32_t getRs1();

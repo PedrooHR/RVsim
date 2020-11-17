@@ -25,7 +25,6 @@ instruction_t::instruction_t(uint32_t ins, unsigned long int add) {
   inst = ins;
   opcode = ins & 127; // 7 bits de opcode
   rd = -1;
-  rd = -1;
   rs1 = -1;
   rs2 = -1;
   func3 = -1;
@@ -34,6 +33,7 @@ instruction_t::instruction_t(uint32_t ins, unsigned long int add) {
   shammt = -1;
   cycle = 1; // Atualmente todas instruções levam 1 ciclo
   op = MNE::FENCEI;
+  fu = FU::NONE;
 
   // INSTRUCTION DECODE
   // Atualmente no IM temos 11 OPCODES
@@ -42,6 +42,7 @@ instruction_t::instruction_t(uint32_t ins, unsigned long int add) {
     type = INST_TYPE::U;
     rd = (ins >> 7) & 31;    // 5 bits de reg
     imm = (ins >> 12) << 12; // 20 bits imm
+    fu = FU::ALU;
     op = MNE::LUI;
     break; // LUI
   }
@@ -49,6 +50,7 @@ instruction_t::instruction_t(uint32_t ins, unsigned long int add) {
     type = INST_TYPE::U;
     rd = (ins >> 7) & 31;    // 5 bits de reg
     imm = (ins >> 12) << 12; // 20 bits imm
+    fu = FU::ALU;
     op = MNE::AUIPC;
     break; // AUIPC
   }
@@ -61,6 +63,7 @@ instruction_t::instruction_t(uint32_t ins, unsigned long int add) {
     int temp_im20 = ((ins >> 31) & 1) << 20;     // 1 bit
     imm = temp_imlow + temp_im11 + temp_imhigh + temp_im20; // 21 bits de imm
     op = MNE::JAL;
+    fu = FU::BRU;
     break; // JAL
   }
   case 0b1100111: {
@@ -70,6 +73,7 @@ instruction_t::instruction_t(uint32_t ins, unsigned long int add) {
     rs1 = (ins >> 15) & 31;   // 5 bits de reg
     imm = (ins >> 20) & 4095; // 12 bits imm
     op = MNE::JALR;
+    fu = FU::BRU;
     break; // JALR
   }
   case 0b1100011: {
@@ -83,6 +87,7 @@ instruction_t::instruction_t(uint32_t ins, unsigned long int add) {
     int temp_im12 = ((ins >> 31) & 1) << 12;                // 1 bit
     imm = temp_imlow + temp_im11 + temp_imhigh + temp_im12; // 13 bits de imm
 
+    fu = FU::BRU;
     switch (func3) {
     case 0: // 000
       op = MNE::BEQ;
@@ -112,6 +117,7 @@ instruction_t::instruction_t(uint32_t ins, unsigned long int add) {
     rs1 = (ins >> 15) & 31;   // 5 bits de reg
     imm = (ins >> 20) & 4095; // 12 bits imm
 
+    fu = FU::AGU;
     switch (func3) {
     case 0: // 000
       op = MNE::LB;
@@ -140,6 +146,7 @@ instruction_t::instruction_t(uint32_t ins, unsigned long int add) {
     int temp_imhigh = (ins >> 25) & 127;   // 7 bits imm high
     imm = temp_imlow + (temp_imhigh << 5); // 12 bits de imm
 
+    fu = FU::AGU;
     switch (func3) {
     case 0: // 000
       op = MNE::SB;
@@ -159,6 +166,7 @@ instruction_t::instruction_t(uint32_t ins, unsigned long int add) {
     func3 = (ins >> 12) & 7;  // 3 bits func3
     rs1 = (ins >> 15) & 31;   // 5 bits de reg
     imm = (ins >> 20) & 4095; // 12 bits imm
+    fu = FU::ALU;
     switch (func3) {
     case 0: // 000
       op = MNE::ADDI;
@@ -202,6 +210,7 @@ instruction_t::instruction_t(uint32_t ins, unsigned long int add) {
     rs2 = (ins >> 20) & 31;    // 5 bits de reg
     func7 = (ins >> 25) & 127; // 7 bits func7
 
+    fu = FU::ALU;
     if (func7 == 1) { // Multiplicação e divisão
       switch (func3) {
       case 0: // 000
@@ -274,6 +283,7 @@ instruction_t::instruction_t(uint32_t ins, unsigned long int add) {
     rs1 = (ins >> 15) & 31;   // 5 bits de reg
     imm = (ins >> 20) & 4095; // 12 bits imm
 
+    fu = FU::NONE;
     if (func3 == 0) {
       op = MNE::FENCE;
     } else if (func3 == 1) {
@@ -288,6 +298,7 @@ instruction_t::instruction_t(uint32_t ins, unsigned long int add) {
     rs1 = (ins >> 15) & 31;   // 5 bits de reg
     imm = (ins >> 20) & 4095; // 12 bits imm
 
+    fu = FU::NONE;
     switch (func3) {
     case 0: // 000
       if (imm == 0) {
@@ -325,6 +336,8 @@ instruction_t::instruction_t(uint32_t ins, unsigned long int add) {
 MNE instruction_t::getOperation() { return op; }
 
 INST_TYPE instruction_t::getType() { return type; }
+
+FU instruction_t::getFU() { return fu; }
 
 uint32_t instruction_t::getOPCode() { return opcode; }
 
