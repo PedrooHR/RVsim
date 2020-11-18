@@ -69,7 +69,7 @@ private:
   bool wrote;
 
 public:
-  processor_t(memory_t *mem, uint32_t entry_point, int n_ins);
+  processor_t(memory_t *mem, uint32_t entry_point, int n_ins, int b_gshare);
 
   void executeProgram();
 

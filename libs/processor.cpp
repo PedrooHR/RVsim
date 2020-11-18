@@ -16,26 +16,28 @@ bool PRINT_INSTRUCTION_END_TIME = false;
 bool PRINT_CACHE_MISSES_LOG = false;
 bool PRINT_GSHARE_LOG = false;
 
-processor_t::processor_t(memory_t *mem, uint32_t entry_point, int n_ins) {
+processor_t::processor_t(memory_t *mem, uint32_t entry_point, int n_ins,
+                         int b_gshare) {
   // Ve se deseja imprimir o log de instruções
-  if (char *env = getenv("PRINT_INSTRUCTION_LOG")) 
-    if (strcmp(env, "true") == 0) 
+  if (char *env = getenv("PRINT_INSTRUCTION_LOG"))
+    if (strcmp(env, "true") == 0)
       PRINT_INSTRUCTION_LOG = true;
-  if (char *env = getenv("PRINT_INSTRUCTION_END_TIME")) 
-    if (strcmp(env, "true") == 0) 
+  if (char *env = getenv("PRINT_INSTRUCTION_END_TIME"))
+    if (strcmp(env, "true") == 0)
       PRINT_INSTRUCTION_END_TIME = true;
   // Ve se deseja imprimir o log de misses da cache
-  if (char *env = getenv("PRINT_CACHE_MISSES_LOG")) 
-    if (strcmp(env, "true") == 0) 
+  if (char *env = getenv("PRINT_CACHE_MISSES_LOG"))
+    if (strcmp(env, "true") == 0)
       PRINT_CACHE_MISSES_LOG = true;
   // Ve se deseja imprimir o log do gshare
-  if (char *env = getenv("PRINT_GSHARE_LOG")) 
-    if (strcmp(env, "true") == 0) 
+  if (char *env = getenv("PRINT_GSHARE_LOG"))
+    if (strcmp(env, "true") == 0)
       PRINT_GSHARE_LOG = true;
 
   memory = mem;
   PC = entry_point;
-  gshare = new gshare_t(10, 1024);
+  gshare = new gshare_t(b_gshare, 1024);
+  // Precisa ajustar o baseoff
   registers.writeReg(2, memory->getTotalSize() - 4); // ajusta stack pointer
   cycle = 0;
 
@@ -59,7 +61,7 @@ void processor_t::executeProgram() {
   uint32_t commit_count = 0;
   while (running) {
     // Devolve o ciclo em que o fetch é feito
-    uint32_t time_instruction = (linst / number_i) + branch_penalty; 
+    uint32_t time_instruction = (linst / number_i) + branch_penalty;
     uint32_t instruction_start = time_instruction;
 
     // ====================================================================== //
@@ -85,34 +87,34 @@ void processor_t::executeProgram() {
     // ====================================================================== //
     uint32_t rs1 = instruction.getRs1();
     uint32_t rs2 = instruction.getRs2();
-    uint32_t rd  = instruction.getRd();
+    uint32_t rd = instruction.getRd();
     FU fu = instruction.getFU();
     // Dependência de dados
     uint32_t rs1_avail = (rs1 != -1) ? registers.checkUW(rs1) : 0;
     uint32_t rs2_avail = (rs2 != -1) ? registers.checkUW(rs2) : 0;
 
     // Indendependente das dependencias, temos pelo menos 3 ciclos
-    time_instruction += BASE_ISSUE_DURATION;  
-    
+    time_instruction += BASE_ISSUE_DURATION;
+
     // Se tiver alguma dependência de dados, vamos postegar o inicio.
-    if (rs1_avail > time_instruction || rs2_avail > time_instruction) 
-      time_instruction = std::max(rs1_avail, rs2_avail); 
+    if (rs1_avail > time_instruction || rs2_avail > time_instruction)
+      time_instruction = std::max(rs1_avail, rs2_avail);
 
     uint32_t res_avail;
     bool mem_acess = false;
     switch (fu) {
-      case FU::ALU: 
-        res_avail = getNextALU(time_instruction);
-        break;
-      case FU::AGU:
-        mem_acess = true;
-        res_avail = getNextAGU(time_instruction);
-        break;
-      case FU::BRU:
-        res_avail = getNextBRU(time_instruction);
-        break;
-      case FU::NONE:
-        break;
+    case FU::ALU:
+      res_avail = getNextALU(time_instruction);
+      break;
+    case FU::AGU:
+      mem_acess = true;
+      res_avail = getNextAGU(time_instruction);
+      break;
+    case FU::BRU:
+      res_avail = getNextBRU(time_instruction);
+      break;
+    case FU::NONE:
+      break;
     }
 
     // se res_avail <= time instruction significa que temos uma unidade
@@ -142,7 +144,7 @@ void processor_t::executeProgram() {
       }
       gshare->feedback(branched, pc_instruction, PC);
     }
-    
+
     if (mem_acess) {
       // remove o write back temporariamente
       time_instruction -= 1;
@@ -160,7 +162,7 @@ void processor_t::executeProgram() {
       time_instruction += 1;
     }
 
-    // Write back 
+    // Write back
     if (wrote)
       // -1 assumindo que se le no mesmo ciclo que se escreve
       registers.setUW(rd, time_instruction - 1);
@@ -177,7 +179,7 @@ void processor_t::executeProgram() {
       commit_count = 1;
     } else {
       commit_count++;
-      if (commit_count > 4) {
+      if (commit_count > number_i) {
         commit_count = 1;
         previous_finish += BASE_COMMIT_DURATION;
       }
@@ -191,10 +193,8 @@ void processor_t::executeProgram() {
     // Imprime log da instrução
     if (PRINT_INSTRUCTION_LOG) {
       std::cout << std::left << std::setw(93) << instruction_log;
-      if (PRINT_INSTRUCTION_END_TIME) {
-        std::cout << " | FINISHED AT: " << std::setw(5) << time_instruction;
+      if (PRINT_INSTRUCTION_END_TIME)
         std::cout << "| COMMITED AT: " << std::setw(5) << commited_at;
-      }
       std::cout << std::endl;
     }
     // ====================================================================== //
@@ -219,6 +219,7 @@ uint32_t processor_t::Fetch(uint32_t *raw_instruction, uint32_t *pc_address,
   uint8_t mem_value;
   uint32_t lcycles = BASE_FETCH_DURATION;
   uint32_t value = 0;
+  // printf("PC: 0x%x\n", PC);
   for (int i = 0; i < 4; i++) {
     lcycles += memory->readMem(PC + i, &mem_value, ACCESS_TYPE::INSTRUCTION);
     value += mem_value << (8 * i);
@@ -856,6 +857,45 @@ uint32_t processor_t::Execute(instruction_t ins, char *disassembly) {
   return lcycle;
 }
 
+uint32_t processor_t::getNextALU(uint32_t time) {
+  int min = 0;
+  for (unsigned int i = 0; i < ALU.size(); i++) {
+    if (ALU[i] < ALU[min])
+      min = i;
+  }
+  int temp = ALU[min];
+  ALU[min] = ((temp < time) ? time : temp) + CICLES_ALU;
+  return temp;
+}
+
+uint32_t processor_t::getNextAGU(uint32_t time) {
+  int min = 0;
+  for (unsigned int i = 0; i < AGU.size(); i++) {
+    if (AGU[i] < AGU[min])
+      min = i;
+  }
+  int temp = AGU[min];
+  AGU[min] = ((temp < time) ? time : temp) + CICLES_AGU;
+  return temp;
+}
+
+uint32_t processor_t::getNextBRU(uint32_t time) {
+  int min = 0;
+  for (unsigned int i = 0; i < BRU.size(); i++) {
+    if (BRU[i] < BRU[min])
+      min = i;
+  }
+  int temp = BRU[min];
+  BRU[min] = ((temp < time) ? time : temp) + CICLES_BRU;
+  return temp;
+}
+
+uint32_t processor_t::getNextMEM(uint32_t time, uint32_t time_used) {
+  int temp = memory_avail;
+  memory_avail = ((temp < time) ? time : temp) + time_used;
+  return temp;
+}
+
 std::string processor_t::doLogLine(instruction_t ins, char *disassembly) {
   std::ostringstream out;
   // Monta PC
@@ -882,45 +922,6 @@ std::string processor_t::doLogLine(instruction_t ins, char *disassembly) {
   // Disassembly (De acordo com os slides)
   out << disassembly;
   return out.str();
-}
-
-uint32_t processor_t::getNextALU(uint32_t time) {
-  int min = 0;
-  for (unsigned int i = 0; i < ALU.size(); i++) {
-    if (ALU[i] < ALU[min])
-      min = i;
-  }
-  int temp = ALU[min];
-  ALU[min] = ((temp < time) ? time : temp) + CICLES_ALU;
-  return temp;
-}
-
-uint32_t processor_t::getNextAGU(uint32_t time) {
-  int min = 0;
-  for (unsigned int i = 0; i < AGU.size(); i++) {
-    if (AGU[i] < AGU[min])
-      min = i;
-  }
-  int temp = AGU[min];
-  AGU[min] = ((temp < time) ? time : temp)  + CICLES_AGU;
-  return temp;
-}
-
-uint32_t processor_t::getNextBRU(uint32_t time) {
-  int min = 0;
-  for (unsigned int i = 0; i < BRU.size(); i++) {
-    if (BRU[i] < BRU[min])
-      min = i;
-  }
-  int temp = BRU[min];
-  BRU[min] = ((temp < time) ? time : temp)  + CICLES_BRU;
-  return temp;
-}
-
-uint32_t processor_t::getNextMEM(uint32_t time, uint32_t time_used) {
-  int temp = memory_avail;
-  memory_avail = ((temp < time) ? time : temp) + time_used;
-  return temp;
 }
 
 /***************************************************************************
@@ -1044,10 +1045,6 @@ void gshare_t::feedback(bool branched, uint32_t pc, uint32_t address) {
   //           << std::endl;
 }
 
-int gshare_t::getHits() { 
-  return hits; 
-}
+int gshare_t::getHits() { return hits; }
 
-int gshare_t::getErrors() { 
-  return errors; 
-}
+int gshare_t::getErrors() { return errors; }

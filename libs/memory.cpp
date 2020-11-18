@@ -1,13 +1,13 @@
 #include "memory.h"
 
-#include <cstdio>
 #include <cmath>
+#include <cstdio>
 
-#include <string>
 #include <map>
+#include <string>
 
-extern "C" { 
-  #include "d4.h"
+extern "C" {
+#include "d4.h"
 }
 
 #define INT_MAX (2147483647)
@@ -52,10 +52,7 @@ void SetupDineroCache(d4cache *cache, const char *pname, int pflags,
   cache->name_wback = (char *)"Wback";
 }
 
-memory_t::memory_t(uint32_t size) { // size in MiBytes
-  memory.clear();
-  memory.resize(size * 1024, 0);
-
+memory_t::memory_t() { // size in MiBytes
   // Cria cache mais baixo nível (memoria);
   caches["memory"] = d4new(NULL);
   // Cria L3
@@ -71,9 +68,8 @@ memory_t::memory_t(uint32_t size) { // size in MiBytes
   SetupDineroCache(caches["L1d"], "L1d", 0, 7, 7, 15, 4, d4rep_lru,
                    d4prefetch_none, 1, 0, d4walloc_always, d4wback_never);
   caches["L1i"] = d4new(caches["L2"]);
-  SetupDineroCache(caches["L1i"], "L1i", D4F_RO, 7, 7, 15, 4,
-                   d4rep_lru, d4prefetch_none, 1, 0, d4walloc_impossible,
-                   d4wback_never);
+  SetupDineroCache(caches["L1i"], "L1i", D4F_RO, 7, 7, 15, 4, d4rep_lru,
+                   d4prefetch_none, 1, 0, d4walloc_impossible, d4wback_never);
 
   // // Cria L3
   // caches["L3"] = d4new(caches["memory"]);
@@ -101,7 +97,7 @@ memory_t::memory_t(uint32_t size) { // size in MiBytes
 
 uint32_t memory_t::writeMem(uint32_t address, uint8_t value, ACCESS_TYPE type) {
   uint32_t cycles = 1;
-  if (type != ACCESS_TYPE::LOAD) { 
+  if (type != ACCESS_TYPE::LOAD) {
     // Verifica os misses antes do acesso
     int pld_miss, pl2_miss, pl3_miss;
     pld_miss = cacheMisses("L1d");
@@ -137,7 +133,7 @@ uint32_t memory_t::writeMem(uint32_t address, uint8_t value, ACCESS_TYPE type) {
       l3_misses++;
     }
   }
-  memory[address] = value;
+  memory_map[address] = value;
   return cycles;
 }
 
@@ -185,13 +181,13 @@ uint32_t memory_t::readMem(uint32_t address, uint8_t *value, ACCESS_TYPE type) {
       l3_misses++;
     }
   }
-  *value = memory[address];
-  return cycles; 
+  *value = memory_map[address];
+  return cycles;
 }
 
 uint32_t memory_t::getTotalSize() { 
-  return memory.size(); 
-}
+  return MEM_SIZE; 
+  }
 
 void memory_t::printCacheMisses() {
   printf("  Li Misses: %d\n", li_misses);
@@ -203,49 +199,40 @@ void memory_t::printCacheMisses() {
 void memory_t::printd4log() {
   // L1i
   printf("L1i dineroIV log:\n");
-  printf("Bytes read: %e - Bytes Written: %e\n", 
-         caches["L1i"]->bytes_read,
+  printf("Bytes read: %e - Bytes Written: %e\n", caches["L1i"]->bytes_read,
          caches["L1i"]->bytes_written);
-  printf("Read fetches %e - Read misses: %e\n", 
-         caches["L1i"]->fetch[D4XINSTRN],
+  printf("Read fetches %e - Read misses: %e\n", caches["L1i"]->fetch[D4XINSTRN],
          caches["L1i"]->miss[D4XINSTRN]);
-  printf("Write fetches %e - Write misses: %e\n\n", 
-         caches["L1i"]->fetch[D4XWRITE],
-         caches["L1i"]->miss[D4XWRITE]);
+  printf("Write fetches %e - Write misses: %e\n\n",
+         caches["L1i"]->fetch[D4XWRITE], caches["L1i"]->miss[D4XWRITE]);
 
   // L1d
   printf("L1d dineroIV log:\n");
-  printf("Bytes read: %e - Bytes Written: %e\n", 
-         caches["L1d"]->bytes_read,
+  printf("Bytes read: %e - Bytes Written: %e\n", caches["L1d"]->bytes_read,
          caches["L1d"]->bytes_written);
-  printf("Read fetches %e - Read misses: %e\n", 
+  printf("Read fetches %e - Read misses: %e\n",
          caches["L1d"]->fetch[D4XREAD] + caches["L1d"]->fetch[D4XINSTRN],
          caches["L1d"]->miss[D4XREAD] + caches["L1d"]->fetch[D4XINSTRN]);
-  printf("Write fetches %e - Write misses: %e\n\n", 
-         caches["L1d"]->fetch[D4XWRITE],
-         caches["L1d"]->miss[D4XWRITE]);
+  printf("Write fetches %e - Write misses: %e\n\n",
+         caches["L1d"]->fetch[D4XWRITE], caches["L1d"]->miss[D4XWRITE]);
 
   // L2
   printf("L2 dineroIV log:\n");
-  printf("Bytes read: %e - Bytes Written: %e\n", 
-         caches["L2"]->bytes_read,
+  printf("Bytes read: %e - Bytes Written: %e\n", caches["L2"]->bytes_read,
          caches["L2"]->bytes_written);
-  printf("Read fetches %e - Read misses: %e\n", 
+  printf("Read fetches %e - Read misses: %e\n",
          caches["L2"]->fetch[D4XREAD] + caches["L2"]->fetch[D4XINSTRN],
          caches["L2"]->miss[D4XREAD] + caches["L2"]->fetch[D4XINSTRN]);
-  printf("Write fetches %e - Write misses: %e\n\n", 
-         caches["L2"]->fetch[D4XWRITE],
-         caches["L2"]->miss[D4XWRITE]);
+  printf("Write fetches %e - Write misses: %e\n\n",
+         caches["L2"]->fetch[D4XWRITE], caches["L2"]->miss[D4XWRITE]);
 
   // L3
   printf("L3 dineroIV log:\n");
-  printf("Bytes read: %e - Bytes Written: %e\n", 
-         caches["L3"]->bytes_read,
+  printf("Bytes read: %e - Bytes Written: %e\n", caches["L3"]->bytes_read,
          caches["L3"]->bytes_written);
-  printf("Read fetches %e - Read misses: %e\n", 
+  printf("Read fetches %e - Read misses: %e\n",
          caches["L3"]->fetch[D4XREAD] + caches["L3"]->fetch[D4XINSTRN],
          caches["L3"]->miss[D4XREAD] + caches["L3"]->fetch[D4XINSTRN]);
-  printf("Write fetches %e - Write misses: %e\n\n", 
-         caches["L3"]->fetch[D4XWRITE],
-         caches["L3"]->miss[D4XWRITE]);
+  printf("Write fetches %e - Write misses: %e\n\n",
+         caches["L3"]->fetch[D4XWRITE], caches["L3"]->miss[D4XWRITE]);
 }

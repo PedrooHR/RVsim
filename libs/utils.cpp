@@ -1,5 +1,7 @@
 #include "utils.h"
 
+#include <cstdio>
+
 #include <fstream>
 
 std::string register_name[32] = {
@@ -55,6 +57,7 @@ uint32_t get_elf_entry(std::vector<uint8_t> mem, uint32_t address, uint32_t size
   for (int i = 0; i < size; i++) {
     entry += mem[address + i] << 8 * i;
   }
+  // printf("Entry: 0x%lX\n", entry);
   return entry;
 }
 
