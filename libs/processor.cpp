@@ -59,18 +59,45 @@ void processor_t::executeProgram() {
   uint32_t branch_penalty = 0;
   uint32_t linst = 0;
   uint32_t commit_count = 0;
+  uint32_t instruction_start = 0;
+  uint32_t instruction_block = 1;
+  uint32_t excendent_cycles = 0;
+  uint32_t block_busy = 0;
   while (running) {
-    // Devolve o ciclo em que o fetch é feito
-    uint32_t time_instruction = (linst / number_i) + branch_penalty;
-    uint32_t instruction_start = time_instruction;
+    // Definindo o tempo de start
+    // linst conta a quantidade de instruções até preencher a janela.
+    linst++; // conta mais uma instrução pra janela
+    if (linst > number_i) {
+      // se ultrapassar o tamanho da janela, vamos começar no ciclo seguinte
+      instruction_start++;
+      instruction_block++; // Nova janela de instruções
+      linst = 1; // ja conta a instrução atual
+    }
+    
+    // Se for um bloco que foi atrasado pelo miss na cache de instruções
+    if (instruction_block == block_busy) {
+      instruction_start += excendent_cycles;
+    }
+
+    // Contador do tempo da instrução
+    uint32_t started_at = instruction_start;
+    uint32_t time_instruction = instruction_start;
 
     // ====================================================================== //
     // ESTAGIO DE FETCH (min 4 ciclos)
     // ====================================================================== //
-    uint32_t raw_instruction, pc_instruction;
+    uint32_t raw_instruction, pc_instruction, fetch_cycles;
     bool prediction;
-    time_instruction += Fetch(&raw_instruction, &pc_instruction, &prediction);
-
+    fetch_cycles = Fetch(&raw_instruction, &pc_instruction, &prediction);
+    // Tivemos um miss na cache de instruções, vamos atrasar o início das
+    // instruções no excendente no próximo bloco de instruções
+    if (fetch_cycles > BASE_FETCH_DURATION) {
+      block_busy = instruction_block + 2; 
+      excendent_cycles = (fetch_cycles - BASE_FETCH_DURATION);
+      time_instruction += fetch_cycles;
+    } else { 
+      time_instruction += fetch_cycles + excendent_cycles;
+    }
     // ====================================================================== //
     // ESTAGIO DE DECODE
     // ====================================================================== //
@@ -132,15 +159,12 @@ void processor_t::executeProgram() {
     char disassembly[50];
     uint32_t extra_cicles = Execute(instruction, disassembly);
     std::string instruction_log = doLogLine(instruction, disassembly);
-
+    bool w_pred = false;
     // Feedback gshare
     if (is_branch) {
-      // Acerto
+      // Erro na branch prediction
       if (branched != prediction) {
-        // Penalidade pelo erro - Cada vez que erramos significa que perdemos um
-        // tanto de ciclos
-        branch_penalty += BRANCH_PREDICTION_PEN;
-        linst = ((linst / number_i) + 1) * number_i;
+        w_pred = true;
       }
       gshare->feedback(branched, pc_instruction, PC);
     }
@@ -186,14 +210,25 @@ void processor_t::executeProgram() {
       commited_at = previous_finish;
     }
 
+    // Predição errada significa que a próxima instrução válida vai começar
+    // agora - A gente reseta tudo quando da um commit ou quando a instrução
+    // termina?
+    if (w_pred) {
+      instruction_start = time_instruction;
+      // Vamos descartar tudo que estiver até agora no pipelina e começar um 
+      // fetch novo no próximo ciclo
+      linst = 0;
+    }
+
     // Contador de instruções
     tinst++;
-    linst++;
 
     // Imprime log da instrução
     if (PRINT_INSTRUCTION_LOG) {
-      std::cout << std::left << std::setw(93) << instruction_log;
+      std::cout << std::left << std::setw(53) << instruction_log;
       if (PRINT_INSTRUCTION_END_TIME)
+        std::cout << "| STARTED AT: " << std::setw(5) << started_at;
+        std::cout << "| FINISHED AT: " << std::setw(5) << time_instruction;
         std::cout << "| COMMITED AT: " << std::setw(5) << commited_at;
       std::cout << std::endl;
     }
@@ -202,6 +237,8 @@ void processor_t::executeProgram() {
   std::cout << "\nINFORMAÇÕES SOBRE CICLOS E #INSTRUÇÕES:\n";
   std::cout << "  Total number of cycles: " << previous_finish << std::endl;
   std::cout << "  Total number of instructions: " << tinst << std::endl;
+  std::cout << "  Cycles per istruction: " << previous_finish / (tinst * 1.0)
+            << std::endl;
   if (PRINT_GSHARE_LOG) {
     std::cout << "\nINFORMAÇÕES SOBRE GSHARE:\n";
     std::cout << "  Acertos: " << gshare->getHits() << std::endl;
@@ -904,21 +941,21 @@ std::string processor_t::doLogLine(instruction_t ins, char *disassembly) {
   // Instrução PC
   out << "[" << std::uppercase << std::hex << std::setw(8) << std::setfill('0')
       << ins.getIns() << "] ";
-  // Monta rd
-  uint32_t rd = (ins.getIns() >> 7) & 31;
-  out << "[x" << std::dec << std::setw(2) << std::setfill('0') << rd << "=";
-  out << std::uppercase << std::hex << std::setw(8) << std::setfill('0')
-      << registers.readReg(rd) << "] ";
-  // Monta rs1
-  uint32_t rs1 = (ins.getIns() >> 15) & 31;
-  out << "[x" << std::dec << std::setw(2) << std::setfill('0') << rs1 << "=";
-  out << std::uppercase << std::hex << std::setw(8) << std::setfill('0')
-      << registers.readReg(rs1) << "] ";
-  // Monta rs2
-  uint32_t rs2 = (ins.getIns() >> 20) & 31;
-  out << "[x" << std::dec << std::setw(2) << std::setfill('0') << rs2 << "=";
-  out << std::uppercase << std::hex << std::setw(8) << std::setfill('0')
-      << registers.readReg(rs2) << "] ";
+  // // Monta rd
+  // uint32_t rd = (ins.getIns() >> 7) & 31;
+  // out << "[x" << std::dec << std::setw(2) << std::setfill('0') << rd << "=";
+  // out << std::uppercase << std::hex << std::setw(8) << std::setfill('0')
+  //     << registers.readReg(rd) << "] ";
+  // // Monta rs1
+  // uint32_t rs1 = (ins.getIns() >> 15) & 31;
+  // out << "[x" << std::dec << std::setw(2) << std::setfill('0') << rs1 << "=";
+  // out << std::uppercase << std::hex << std::setw(8) << std::setfill('0')
+  //     << registers.readReg(rs1) << "] ";
+  // // Monta rs2
+  // uint32_t rs2 = (ins.getIns() >> 20) & 31;
+  // out << "[x" << std::dec << std::setw(2) << std::setfill('0') << rs2 << "=";
+  // out << std::uppercase << std::hex << std::setw(8) << std::setfill('0')
+  //     << registers.readReg(rs2) << "] ";
   // Disassembly (De acordo com os slides)
   out << disassembly;
   return out.str();

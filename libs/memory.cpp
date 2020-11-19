@@ -127,10 +127,14 @@ uint32_t memory_t::writeMem(uint32_t address, uint8_t value, ACCESS_TYPE type) {
     if (l2_miss > pl2_miss) {
       cycles += L2_MISS_PENALTY;
       l2_misses++;
+      if (type == ACCESS_TYPE::INSTRUCTION)
+        l2_misses_from_instructions++;
     }
     if (l3_miss > pl3_miss) {
       cycles += L3_MISS_PENALTY;
       l3_misses++;
+      if (type == ACCESS_TYPE::INSTRUCTION)
+        l3_misses_from_instructions++;
     }
   }
   memory_map[address] = value;
@@ -175,10 +179,14 @@ uint32_t memory_t::readMem(uint32_t address, uint8_t *value, ACCESS_TYPE type) {
     if (l2_miss > pl2_miss) {
       cycles += L2_MISS_PENALTY;
       l2_misses++;
+      if (type == ACCESS_TYPE::INSTRUCTION)
+        l2_misses_from_instructions++;
     }
     if (l3_miss > pl3_miss) {
       cycles += L3_MISS_PENALTY;
       l3_misses++;
+      if (type == ACCESS_TYPE::INSTRUCTION)
+        l3_misses_from_instructions++;
     }
   }
   *value = memory_map[address];
@@ -192,8 +200,10 @@ uint32_t memory_t::getTotalSize() {
 void memory_t::printCacheMisses() {
   printf("  Li Misses: %d\n", li_misses);
   printf("  Ld Misses: %d\n", ld_misses);
-  printf("  L2 Misses: %d\n", l2_misses);
-  printf("  L3 Misses: %d\n", l3_misses);
+  printf("  L2 Misses: %d - From instructions: %d\n", l2_misses,
+         l2_misses_from_instructions);
+  printf("  L3 Misses: %d - From instructions: %d\n", l3_misses,
+         l3_misses_from_instructions);
 }
 
 void memory_t::printd4log() {

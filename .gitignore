@@ -2,3 +2,4 @@ build/
 rvsim
 testes/
 *.txt
+*.log

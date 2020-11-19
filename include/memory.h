@@ -27,7 +27,9 @@ private:
   int li_misses = 0;
   int ld_misses = 0;
   int l2_misses = 0;
+  int l2_misses_from_instructions = 0;
   int l3_misses = 0;
+  int l3_misses_from_instructions = 0;
 
 public:
   memory_t();
